@@ -8,17 +8,21 @@ Tracks competitors, pricing signals, product launches, and news sentiment in rea
 ## 🗂️ Project Structure
 
 ```
-tata_competitive_intel/
+INI-Internship/
 ├── app.py                    ← Main Streamlit dashboard (launch this)
 ├── competitors.py            ← Competitor config (add/edit competitors here)
-├── data_manager.py           ← Data persistence & caching layer
+├── config.py                 ← Industry RSS feeds, product categories & API key placeholders
+├── data_manager.py           ← Data persistence & caching layer (MySQL + JSON fallback)
+├── db.py                     ← MySQL connection, schema management & CRUD helpers
 ├── requirements.txt          ← All Python dependencies
 ├── setup_and_run.sh          ← One-click setup & launch script (Mac/Linux)
+├── .env.example              ← Template for environment variables (DB credentials, API keys)
 ├── scrapers/
 │   ├── news_scraper.py       ← Google News RSS + competitor RSS scraping
 │   ├── sentiment_analyzer.py ← TextBlob NLP sentiment analysis
 │   └── pricing_tracker.py    ← Pricing database + web extraction
 └── data/                     ← Auto-created; stores JSON cache files
+    ├── cache.json
     ├── news_data.json
     ├── pricing_data.json
     └── products_data.json
@@ -30,15 +34,12 @@ tata_competitive_intel/
 
 ### Option A — One command (Mac/Linux)
 ```bash
-cd tata_competitive_intel
 chmod +x setup_and_run.sh
 ./setup_and_run.sh
 ```
 
 ### Option B — Manual setup
 ```bash
-cd tata_competitive_intel
-
 # 1. Create virtual environment
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
@@ -47,13 +48,43 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 3. Download NLTK data
-python3 -c "import nltk; nltk.download('punkt'); nltk.download('vader_lexicon')"
+python3 -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('vader_lexicon')"
 
-# 4. Launch dashboard
+# 4. (Optional) Configure environment variables — see Database Setup below
+
+# 5. Launch dashboard
 streamlit run app.py
 ```
 
 Open **http://localhost:8501** in your browser.
+
+---
+
+## 🗄️ Database Setup
+
+The application supports **MySQL** as the primary data store, with an automatic fallback to JSON file storage when MySQL credentials are not configured.
+
+### Using JSON file storage (default — no setup required)
+Leave `DB_USER` and `DB_PASSWORD` unset (or blank). All data is persisted in the `data/` directory.
+
+### Using MySQL
+1. Copy `.env.example` to `.env` and fill in your MySQL credentials:
+    ```bash
+    cp .env.example .env
+    ```
+    ```ini
+    DB_HOST=localhost
+    DB_PORT=3306
+    DB_USER=your_mysql_user
+    DB_PASSWORD=your_mysql_password
+    DB_NAME=competitive_intel
+    ```
+2. The setup script (or `db.init_schema()`) will create the required tables automatically on first run.
+3. **Optional API keys** for enhanced news coverage can also be set in `.env`:
+    ```ini
+    GNEWS_API_KEY=your_key_here
+    NEWSAPI_KEY=your_key_here
+    ```
 
 ---
 
@@ -87,10 +118,7 @@ COMPETITORS["New Company"] = {
 ```
 
 ### Adding news search keywords
-In `competitors.py`:
-```python
-NEWS_KEYWORDS["New Company"] = ["keyword 1", "keyword 2"]
-```
+In `config.py`, extend `INDUSTRY_RSS_FEEDS` or add competitor-specific `news_queries` in `competitors.py`.
 
 ### Updating pricing data
 Edit `data/pricing_data.json` directly, or reset by deleting it (defaults reload from `scrapers/pricing_tracker.py`).
@@ -116,8 +144,10 @@ Edit `data/products_data.json` or update `MOCK_PRODUCT_LAUNCHES` in `data_manage
 | UI Framework | Streamlit 1.32 |
 | Charts | Plotly 5 |
 | Scraping | feedparser + BeautifulSoup4 |
-| NLP / Sentiment | TextBlob |
-| Data | pandas + JSON flat files |
+| NLP / Sentiment | TextBlob + NLTK |
+| Data Storage | MySQL (primary) · JSON flat files (fallback) |
+| Data Processing | pandas |
+| Visualisation | Altair · Matplotlib · WordCloud |
 | Styling | Custom CSS (Space Grotesk font) |
 
 ---
@@ -125,8 +155,8 @@ Edit `data/products_data.json` or update `MOCK_PRODUCT_LAUNCHES` in `data_manage
 ## 🔒 Notes
 
 - This tool uses only **publicly available** RSS feeds and Google News
-- No authentication or paid APIs required
-- For production use, consider adding a PostgreSQL backend and Redis cache
+- No paid APIs are required; optional API keys (`GNEWS_API_KEY`, `NEWSAPI_KEY`) improve news coverage
+- MySQL integration uses `mysql-connector-python>=9.1.0`; the app falls back to JSON storage when credentials are absent
 - Enterprise pricing data should be verified with your sales/analyst team
 
 ---
