@@ -1,0 +1,10 @@
+cd tata_competitive_intel
+
+python -m venv venv
+venv\Scripts\activate
+
+pip install -r requirements.txt
+
+python -c "import nltk; nltk.download('punkt'); nltk.download('vader_lexicon'); nltk.download('stopwords')"
+
+streamlit run app.py
