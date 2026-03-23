@@ -1,10 +1,12 @@
 # data_manager.py - Handles caching and data persistence
+# Supports MySQL (primary) with automatic fallback to JSON file storage.
 
 import json
 import os
-import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
+
+import db
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 CACHE_FILE = os.path.join(DATA_DIR, "cache.json")
@@ -17,7 +19,9 @@ def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def load_cache() -> dict:
+# ── JSON-backed cache helpers (used as fallback) ──────────────────────────────
+
+def _load_json_cache() -> dict:
     ensure_data_dir()
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
@@ -25,14 +29,25 @@ def load_cache() -> dict:
     return {}
 
 
-def save_cache(cache: dict):
+def _save_json_cache(cache: dict):
     ensure_data_dir()
     with open(CACHE_FILE, "w") as f:
         json.dump(cache, f, indent=2)
 
 
+# ── public cache API ──────────────────────────────────────────────────────────
+
 def is_cache_fresh(key: str, hours: int = CACHE_EXPIRY_HOURS) -> bool:
-    cache = load_cache()
+    if db.mysql_available():
+        entry = db.get_cache_entry(key)
+        if not entry:
+            return False
+        cached_time = entry["cached_at"]
+        if isinstance(cached_time, str):
+            cached_time = datetime.fromisoformat(cached_time)
+        return datetime.now() - cached_time < timedelta(hours=hours)
+
+    cache = _load_json_cache()
     if key not in cache:
         return False
     ts = cache[key].get("timestamp")
@@ -43,19 +58,33 @@ def is_cache_fresh(key: str, hours: int = CACHE_EXPIRY_HOURS) -> bool:
 
 
 def get_cached_data(key: str) -> Optional[dict]:
-    cache = load_cache()
-    if key in cache:
-        return cache[key].get("data")
-    return None
+    if db.mysql_available():
+        entry = db.get_cache_entry(key)
+        return entry["data"] if entry else None
+
+    cache = _load_json_cache()
+    return cache[key].get("data") if key in cache else None
 
 
 def set_cached_data(key: str, data):
-    cache = load_cache()
-    cache[key] = {"timestamp": datetime.now().isoformat(), "data": data}
-    save_cache(cache)
+    if db.mysql_available():
+        db.set_cache_entry(key, data)
+        return
 
+    cache = _load_json_cache()
+    cache[key] = {"timestamp": datetime.now().isoformat(), "data": data}
+    _save_json_cache(cache)
+
+
+# ── news data ─────────────────────────────────────────────────────────────────
 
 def save_news_data(news_data: dict):
+    if db.mysql_available():
+        for company, articles in news_data.items():
+            db.upsert_news_articles(company, articles)
+        db.set_cache_entry("news", {"fetched_at": datetime.now().isoformat()})
+        return
+
     ensure_data_dir()
     payload = {"fetched_at": datetime.now().isoformat(), "news": news_data}
     with open(NEWS_FILE, "w") as f:
@@ -64,6 +93,10 @@ def save_news_data(news_data: dict):
 
 
 def load_news_data() -> Optional[dict]:
+    if db.mysql_available():
+        data = db.fetch_news_articles()
+        return data if data else None
+
     if os.path.exists(NEWS_FILE):
         with open(NEWS_FILE, "r") as f:
             payload = json.load(f)
@@ -71,7 +104,19 @@ def load_news_data() -> Optional[dict]:
     return None
 
 
-def get_news_age() -> Optional[str]:
+def get_news_age() -> str:
+    if db.mysql_available():
+        fetched_at = db.get_news_fetched_at()
+        if fetched_at:
+            delta = datetime.now() - fetched_at
+            if delta.seconds < 3600 and delta.days == 0:
+                return f"{delta.seconds // 60} minutes ago"
+            elif delta.days == 0:
+                return f"{delta.seconds // 3600} hours ago"
+            else:
+                return f"{delta.days} days ago"
+        return "Never"
+
     if os.path.exists(NEWS_FILE):
         with open(NEWS_FILE, "r") as f:
             payload = json.load(f)
@@ -79,7 +124,7 @@ def get_news_age() -> Optional[str]:
             if fetched_at:
                 dt = datetime.fromisoformat(fetched_at)
                 delta = datetime.now() - dt
-                if delta.seconds < 3600:
+                if delta.seconds < 3600 and delta.days == 0:
                     return f"{delta.seconds // 60} minutes ago"
                 elif delta.days == 0:
                     return f"{delta.seconds // 3600} hours ago"
@@ -202,10 +247,18 @@ MOCK_PRODUCT_LAUNCHES = [
 
 
 def load_product_launches() -> list:
+    if db.mysql_available():
+        rows = db.fetch_product_launches()
+        if rows:
+            return rows
+        # Seed the database with defaults on first run
+        db.upsert_product_launches(MOCK_PRODUCT_LAUNCHES)
+        return MOCK_PRODUCT_LAUNCHES
+
     if os.path.exists(PRODUCTS_FILE):
         with open(PRODUCTS_FILE, "r") as f:
             return json.load(f)
-    # Save defaults
+    # Save defaults to JSON
     ensure_data_dir()
     with open(PRODUCTS_FILE, "w") as f:
         json.dump(MOCK_PRODUCT_LAUNCHES, f, indent=2)
@@ -213,6 +266,10 @@ def load_product_launches() -> list:
 
 
 def save_product_launches(launches: list):
+    if db.mysql_available():
+        db.upsert_product_launches(launches)
+        return
+
     ensure_data_dir()
     with open(PRODUCTS_FILE, "w") as f:
         json.dump(launches, f, indent=2)

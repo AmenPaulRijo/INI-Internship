@@ -9,9 +9,15 @@
 import json
 import os
 import re
+import sys
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+
+# Ensure the project root is on the path so `db` is importable when this
+# module is loaded from a subdirectory (e.g. scrapers/).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import db  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 PRICING_FILE = os.path.join(DATA_DIR, "pricing_data.json")
@@ -170,6 +176,14 @@ DEFAULT_PRICING = {
 
 
 def load_pricing_data() -> dict:
+    if db.mysql_available():
+        data = db.fetch_pricing_data()
+        if len(data) > 1:  # has at least one company besides "last_updated"
+            return data
+        # Seed the database with defaults on first run
+        db.upsert_pricing_data(DEFAULT_PRICING)
+        return DEFAULT_PRICING
+
     os.makedirs(DATA_DIR, exist_ok=True)
     if os.path.exists(PRICING_FILE):
         with open(PRICING_FILE, "r") as f:
@@ -180,6 +194,10 @@ def load_pricing_data() -> dict:
 
 
 def save_pricing_data(data: dict):
+    if db.mysql_available():
+        db.upsert_pricing_data(data)
+        return
+
     os.makedirs(DATA_DIR, exist_ok=True)
     data["last_updated"] = datetime.now().isoformat()
     with open(PRICING_FILE, "w") as f:
