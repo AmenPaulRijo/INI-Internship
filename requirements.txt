@@ -14,3 +14,4 @@ matplotlib==3.8.3
 Pillow==10.2.0
 lxml==5.1.0
 fake-useragent==1.4.0
+mysql-connector-python>=9.1.0

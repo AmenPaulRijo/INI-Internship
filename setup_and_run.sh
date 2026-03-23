@@ -41,6 +41,17 @@ print('  NLTK data ready.')
 # Create data directory
 mkdir -p data
 
+# Initialise MySQL schema (runs only when DB_USER / DB_PASSWORD are set)
+echo "🗄️  Initialising database..."
+python3 -c "
+import db
+if db.mysql_available():
+    db.init_schema()
+    print('  MySQL schema initialised.')
+else:
+    print('  MySQL not configured — using JSON file storage.')
+"
+
 # Pre-populate pricing data
 echo "💾 Initializing pricing database..."
 python3 -c "
